@@ -1,23 +1,37 @@
 <template>
   <div id="tags-view-container" class="tags-view-container">
-    <scroll-pane ref="scrollPane" class="tags-view-wrapper" @scroll="handleScroll">
-      <router-link
-        v-for="tag in visitedViews"
-        ref="tag"
-        :key="tag.path"
-        :class="isActive(tag)?'active':''"
-        :to="{ path: tag.path, query: tag.query, fullPath: tag.fullPath }"
-        tag="span"
-        class="tags-view-item"
-        @click.middle.native="!isAffix(tag)?closeSelectedTag(tag):''"
-        @contextmenu.prevent.native="openMenu(tag,$event)"
-      >
-        {{ tag.title }}
-        <span v-if="!isAffix(tag)" class="el-icon-close" @click.prevent.stop="closeSelectedTag(tag)" />
-      </router-link>
-    </scroll-pane>
+    <vue-tabs-chrome
+      ref="tab"
+      v-model="tab"
+      :tabs="tabs"
+      :on-close="onClose"
+      @click="handleTabClick"
+      @dragend="handleDragEnd"
+      @contextmenu.prevent.native="handleRightClick"
+    />
+    <!-- <router-link
+      v-for="tag in visitedViews"
+      ref="tag"
+      :key="tag.path"
+      :class="isActive(tag)?'active':''"
+      :to="{ path: tag.path, query: tag.query, fullPath: tag.fullPath }"
+      tag="div"
+      class="chrome-tab"
+      @click.middle.native="!isAffix(tag)?closeSelectedTag(tag):''"
+      @contextmenu.prevent.native="openMenu(tag,$event)"
+    >
+      <div class="chrome-tab-background">
+        <svg version="1.1" xmlns="http://www.w3.org/2000/svg"><defs><symbol id="chrome-tab-geometry-left" viewBox="0 0 214 36"><path d="M17 0h197v36H0v-2c4.5 0 9-3.5 9-8V8c0-4.5 3.5-8 8-8z"/></symbol><symbol id="chrome-tab-geometry-right" viewBox="0 0 214 36"><use xlink:href="#chrome-tab-geometry-left"/></symbol><clipPath id="crop"><rect class="mask" width="100%" height="100%" x="0"/></clipPath></defs><svg width="52%" height="100%"><use xlink:href="#chrome-tab-geometry-left" width="214" height="36" class="chrome-tab-geometry"/></svg><g transform="scale(-1, 1)"><svg width="52%" height="100%" x="-100%" y="0"><use xlink:href="#chrome-tab-geometry-right" width="214" height="36" class="chrome-tab-geometry"/></svg></g></svg>
+      </div>
+      <div class="chrome-tab-content">
+        <div class="chrome-tab-title">{{ tag.title }}</div>
+        <div class="chrome-tab-drag-handle"></div>
+        <div class="chrome-tab-close"></div>
+      </div>
+      <span v-if="!isAffix(tag)" class="el-icon-close" @click.prevent.stop="closeSelectedTag(tag)" />
+    </router-link> -->
     <ul v-show="visible" :style="{left:left+'px',top:top+'px'}" class="contextmenu">
-      <li @click="refreshSelectedTag(selectedTag)">Refresh</li>
+      <!-- <li @click="refreshSelectedTag(selectedTag)">Refresh</li> -->
       <li v-if="!isAffix(selectedTag)" @click="closeSelectedTag(selectedTag)">Close</li>
       <li @click="closeOthersTags">Close Others</li>
       <li @click="closeAllTags(selectedTag)">Close All</li>
@@ -26,32 +40,49 @@
 </template>
 
 <script>
-import ScrollPane from './ScrollPane'
 import path from 'path'
-
+import { mapGetters } from 'vuex'
 export default {
-  components: { ScrollPane },
+  components: { },
   data() {
     return {
       visible: false,
       top: 0,
       left: 0,
       selectedTag: {},
-      affixTags: []
+      affixTags: [],
+      tab: '',
+      tabs: []
     }
   },
   computed: {
-    visitedViews() {
-      return this.$store.state.tagsView.visitedViews
-    },
+    ...mapGetters([
+      'visitedViews'
+    ]),
     routes() {
       return this.$store.state.permission.routes
     }
   },
   watch: {
-    $route() {
+    $route(value) {
+      if (!value.name) return
+      var result = this.visitedViews.some(function(item) {
+        if (item.name === value.name) {
+          return true
+        }
+      })
+      if (!result) {
+        var newTabs = [
+          {
+            label: value.name,
+            key: value.name,
+            closable: !this.isAffix(value)
+          }
+        ]
+        this.$refs.tab.addTab(...newTabs)
+      }
+      this.tab = value.name
       this.addTags()
-      this.moveToCurrentTag()
     },
     visible(value) {
       if (value) {
@@ -62,10 +93,61 @@ export default {
     }
   },
   mounted() {
+    // this.layoutTabs()
+    this.$nextTick(() => {
+      if (this.visitedViews.length > 0) {
+        this.visitedViews.forEach((v, i) => {
+          var newTabs = [
+            {
+              label: v.name,
+              key: v.name,
+              closable: !this.isAffix(v)
+            }
+          ]
+          this.$refs.tab.addTab(...newTabs)
+        })
+        this.tab = this.tabs[0].key
+      }
+    })
     this.initTags()
     this.addTags()
   },
   methods: {
+    onClose(tab, key, index) {
+      // do not update tab key
+      this.visitedViews.forEach((v, i) => {
+        if (v.name === key) {
+          this.$store.dispatch('tagsView/delView', v)
+        }
+      })
+      // 判断关闭的是否是当前页
+      if (this.tab === key) {
+        if (this.tabs[index + 1]) {
+          this.visitedViews.forEach((v1, i1) => {
+            if (v1.name === this.tabs[index + 1].key) {
+              this.$router.push({ path: v1.path, query: v1.query, fullPath: v1.fullPath })
+            }
+          })
+        } else {
+          this.visitedViews.forEach((v2, i2) => {
+            if (v2.name === this.tabs[index - 1].key) {
+              this.$router.push({ path: v2.path, query: v2.query, fullPath: v2.fullPath })
+            }
+          })
+        }
+      }
+      return true
+    },
+    handleTabClick(e, tab, index) {
+      this.visitedViews.forEach((v, i) => {
+        if (v.name === tab.key) {
+          this.$router.push({ path: v.path, query: v.query, fullPath: v.fullPath })
+        }
+      })
+    },
+    handleDragEnd(e, tab) {
+      this.handleTabClick(e, tab)
+    },
     isActive(route) {
       return route.path === this.$route.path
     },
@@ -124,36 +206,45 @@ export default {
         }
       })
     },
-    refreshSelectedTag(view) {
-      this.$store.dispatch('tagsView/delCachedView', view).then(() => {
-        const { fullPath } = view
-        this.$nextTick(() => {
-          this.$router.replace({
-            path: '/redirect' + fullPath
-          })
-        })
-      })
-    },
+    // refreshSelectedTag(view) {
+    //   this.$store.dispatch('tagsView/delCachedView', view).then(() => {
+    //     const { fullPath } = view
+    //     this.$nextTick(() => {
+    //       this.$router.replace(view.path)
+    //     })
+    //   })
+    // },
     closeSelectedTag(view) {
+      this.$refs.tab.removeTab(view.name)
       this.$store.dispatch('tagsView/delView', view).then(({ visitedViews }) => {
-        if (this.isActive(view)) {
+        if (this.tab === view.name) {
           this.toLastView(visitedViews, view)
         }
       })
     },
     closeOthersTags() {
       this.$router.push(this.selectedTag)
-      this.$store.dispatch('tagsView/delOthersViews', this.selectedTag).then(() => {
-        this.moveToCurrentTag()
+      var delArr = []
+      this.tabs.forEach(v => {
+        if (v.key !== this.selectedTag.name && v.closable) {
+          delArr.push(v.key)
+        }
+      })
+      delArr.forEach(v => {
+        this.$refs.tab.removeTab(v)
       })
     },
     closeAllTags(view) {
-      this.$store.dispatch('tagsView/delAllViews').then(({ visitedViews }) => {
-        if (this.affixTags.some(tag => tag.path === view.path)) {
-          return
+      var delArr = []
+      this.tabs.forEach(v => {
+        if (v.closable) {
+          delArr.push(v.key)
         }
-        this.toLastView(visitedViews, view)
       })
+      delArr.forEach(v => {
+        this.$refs.tab.removeTab(v)
+      })
+      this.$router.push(this.visitedViews.slice(-1)[0].fullPath)
     },
     toLastView(visitedViews, view) {
       const latestView = visitedViews.slice(-1)[0]
@@ -170,7 +261,7 @@ export default {
         }
       }
     },
-    openMenu(tag, e) {
+    handleRightClick(e) {
       const menuMinWidth = 105
       const offsetLeft = this.$el.getBoundingClientRect().left // container margin left
       const offsetWidth = this.$el.offsetWidth // container width
@@ -185,7 +276,11 @@ export default {
 
       this.top = e.clientY
       this.visible = true
-      this.selectedTag = tag
+      this.visitedViews.forEach((item, index) => {
+        if (item.name === e.target.innerText) {
+          this.selectedTag = item
+        }
+      })
     },
     closeMenu() {
       this.visible = false
@@ -199,17 +294,18 @@ export default {
 
 <style lang="scss" scoped>
 .tags-view-container {
-  height: 34px;
+  height: 45px;
   width: 100%;
-  background: #fff;
+  background: #dee1e6;
   border-bottom: 1px solid #d8dce5;
   box-shadow: 0 1px 3px 0 rgba(0, 0, 0, .12), 0 0 3px 0 rgba(0, 0, 0, .04);
   .tags-view-wrapper {
-    .tags-view-item {
+    .chrome-tab {
       display: inline-block;
       position: relative;
       cursor: pointer;
       height: 26px;
+      width: 180px;
       line-height: 26px;
       border: 1px solid #d8dce5;
       color: #495060;
@@ -218,28 +314,33 @@ export default {
       font-size: 12px;
       margin-left: 5px;
       margin-top: 4px;
-      &:first-of-type {
-        margin-left: 15px;
-      }
-      &:last-of-type {
-        margin-right: 15px;
-      }
-      &.active {
-        background-color: #42b983;
-        color: #fff;
-        border-color: #42b983;
-        &::before {
-          content: '';
-          background: #fff;
-          display: inline-block;
-          width: 8px;
-          height: 8px;
-          border-radius: 50%;
-          position: relative;
-          margin-right: 2px;
-        }
-      }
     }
+  }
+  .chrome-tab-background {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .chrome-tab-background > svg {
+    width: 100%;
+    height: 100%;
+  }
+  .chrome-tab-background > svg .chrome-tab-geometry {
+    fill: #f4f5f6;
+  }
+  .chrome-tab[active] {
+    z-index: 5;
+  }
+  .chrome-tab[active] .chrome-tab-background > svg .chrome-tab-geometry {
+    fill: #fff;
+  }
+  .chrome-tab:not([active]) .chrome-tab-background {
+    transition: opacity 0.2s ease;
+    opacity: 0;
   }
   .contextmenu {
     margin: 0;
@@ -266,6 +367,10 @@ export default {
 </style>
 
 <style lang="scss">
+.tabs-label {
+  font-size: 12px;
+  cursor: pointer;
+}
 //reset element css of el-icon-close
 .tags-view-wrapper {
   .tags-view-item {
